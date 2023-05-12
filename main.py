@@ -3,9 +3,13 @@ import itertools
 import math
 import networkx as nx
 
+import matplotlib.pyplot as plt
+#matplotlib widget
+from mpl_toolkits.mplot3d import Axes3D
 
-MAX_LENGTH = 5
+MAX_LENGTH = 4
 SQUARE_SIZE=4
+LAYER_HEIGHT=5
 
 def create_individual(nbr_layers, mu=5, sigma=1):
     """
@@ -21,7 +25,7 @@ def create_individual(nbr_layers, mu=5, sigma=1):
 
 
     """
-    individual = [[ (round(SQUARE_SIZE*random.random()) , round(SQUARE_SIZE*random.random())) for _ in range(round(random.normal(mu,sigma)))] for _ in range(nbr_layers)]
+    individual = [[ (round(SQUARE_SIZE*random.random()) , round(SQUARE_SIZE*random.random()), layer*LAYER_HEIGHT) for _ in range(round(random.normal(mu,sigma)))] for layer in range(nbr_layers)]
     return individual
 
 
@@ -58,9 +62,10 @@ def generate_graph(individual):
     nbr_layers = len(individual)
     for layer in range(nbr_layers):
         G.add_nodes_from(individual[layer]) #we add this layer to the graph 
-        potential_spaghetti = itertools.combinations(individual[layer],2)
+        potential_spaghetti = list(itertools.combinations(individual[layer],2))
         if layer < nbr_layers - 1:
-            potential_spaghetti.append(itertools.product(individual[layer], individual[layer+1])) #we add spaghetti between levels
+            potential_spaghetti += list(itertools.product(individual[layer], individual[layer+1])) #we add spaghetti between levels
+
 
         for potential_spaghetto in potential_spaghetti:
             length = math.sqrt((potential_spaghetto[0][0] - potential_spaghetto[1][0])**2 + (potential_spaghetto[0][1] - potential_spaghetto[1][1])**2)
@@ -88,10 +93,21 @@ def check_connectivity(graph):
     return min(degree_sequence)
 
 
+def draw_tower(graph):
+    x, y, z = zip(*list(graph.nodes()))
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    ax.scatter(x, y, z, c=z, cmap='seismic', linewidths=10, alpha=1)
+    for edge in list(graph.edges()):
+        x_ed, y_ed, z_ed = zip(*list(edge))
+        ax.plot(x_ed,y_ed,z_ed, c="#FFBB00")
+    plt.show()
+    fig.savefig("model_undeformed_inc0_3d.png")
+
 if __name__ == "__main__":
-    a = create_individual(1)
-    print(a)
+    a = create_individual(4)
     graph = generate_graph(a)
-    print(graph.nodes())
-    print(graph.edges())
+    #print(graph.nodes())
+    #print(graph.edges())
     print(check_connectivity(graph))
+    draw_tower(graph)
