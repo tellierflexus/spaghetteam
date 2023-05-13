@@ -10,8 +10,9 @@ from mpl_toolkits.mplot3d import Axes3D
 MAX_LENGTH = 4
 SQUARE_SIZE=4
 LAYER_HEIGHT=5
+MUTATION_ADD=5
 
-def create_individual(nbr_layers, mu=5, sigma=1):
+def create_individual(nbr_layers, mu=6, sigma=0.7):
     """
     Create an individual 
     An individual is a list of 4 layer, each layer is a list containing tuple for representing marhsmallow position
@@ -25,7 +26,7 @@ def create_individual(nbr_layers, mu=5, sigma=1):
 
 
     """
-    individual = [[ (round(SQUARE_SIZE*random.random()) , round(SQUARE_SIZE*random.random()), layer*LAYER_HEIGHT) for _ in range(round(random.normal(mu,sigma)))] for layer in range(nbr_layers)]
+    individual = [[ (round(SQUARE_SIZE*random.normal(0.5,0.2)) , round(SQUARE_SIZE*random.normal(0.5,0.2)), layer*LAYER_HEIGHT) for _ in range(round(random.normal(mu,sigma)))] for layer in range(nbr_layers)]
     return individual
 
 
@@ -45,7 +46,8 @@ def create_initial_population(nbr_ind, nbr_layers, mu=5, sigma=1):
     
     
     """
-    population = [  create_individual(nbr_layers, mu, sigma)   for _ in range(nbr_ind)   ]
+    population = [  create_individual(nbr_layers, mu, sigma)   for _ in range(nbr_ind) ]
+    return population
 
 
 def generate_graph(individual):
@@ -104,10 +106,68 @@ def draw_tower(graph):
     plt.show()
     fig.savefig("model_undeformed_inc0_3d.png")
 
+
+def crossover(population):
+    new_population = []
+    for index in range(len(population)):
+        ind_a = population[index]
+        ind_b = population[-index-1]
+        new_individual_a = []
+        new_individual_b = []
+        for layer in range(len(ind_a)):
+            new_layer_a = []
+            new_layer_b = []
+            new_layer_a.extend(ind_a[layer][:round(random.random()*(len(ind_a[layer])-1))])
+            new_layer_a.extend(ind_b[layer][round(random.random()*(len(ind_b[layer])-1)):])
+            new_layer_b.extend(ind_a[layer][round(random.random()*(len(ind_a[layer])-1)):])
+            new_layer_b.extend(ind_b[layer][:round(random.random()*(len(ind_b[layer])-1))])
+            new_individual_a.append(new_layer_a)
+            new_individual_b.append(new_layer_b)
+        new_population.append(new_individual_a)
+        new_population.append(new_individual_b)
+    return new_population
+
+def mutate(population):
+    mutated_population = []
+    print("size of ind 0 layer 0 " + str(len(population[0][0])))
+    for ind in population:
+        for layer in range(len(ind)):
+            for _ in range(round(MUTATION_ADD*random.random())):
+                ind[layer].append((round(SQUARE_SIZE*random.random()), round(SQUARE_SIZE*random.random()), layer))
+                print("added marshmallow to layer " + str(layer))
+        mutated_population.append(ind)
+    print("size of ind 0 layer 0 after mutation " + str(len(population[0][0])))
+    return mutated_population
+
+
+    return mutated_population
+
+def create_next_generation(population, fitness_values, mode="elitism", size=10, elitism_size=2, crossover_size=6, mutation_size=2):
+    new_population = []
+    match mode:
+        case "elitism":
+            sorted_population = [individual for _, individual in sorted(zip(fitness_values, population), key=lambda pair: pair[0])]         
+            new_population.extend(sorted_population[:elitism_size])
+            sorted_population = sorted_population[elitism_size:]
+            random.shuffle(sorted_population) #to prevent always the same element beeing crossover of mutate
+            new_population.extend(crossover(sorted_population[:crossover_size]))
+            new_population.extend(mutate(sorted_population[crossover_size:]))
+            return new_population
+        case "default":
+            return population
+
 if __name__ == "__main__":
-    a = create_individual(4)
-    graph = generate_graph(a)
+    #a = create_individual(4)
+    #graph = generate_graph(a)
     #print(graph.nodes())
     #print(graph.edges())
-    print(check_connectivity(graph))
+    #print(check_connectivity(graph))
+    #draw_tower(graph)
+    population = create_initial_population(10,4)
+    fitness_values = [random.random() for _ in range(len(population))]
+    new_pop = create_next_generation(population, fitness_values)
+    print(len(new_pop))
+    #print(new_pop[0])
+    graph = generate_graph(new_pop[0])
     draw_tower(graph)
+
