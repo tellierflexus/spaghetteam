@@ -1,8 +1,9 @@
-from numpy import random
-import itertools 
-import math
+import trusspy as tp
 import networkx as nx
-
+import itertools
+import math
+from numpy import random, Inf
+#%matplotlib inline
 import matplotlib.pyplot as plt
 #matplotlib widget
 from mpl_toolkits.mplot3d import Axes3D
@@ -26,7 +27,7 @@ def create_individual(nbr_layers, mu=6, sigma=0.7):
 
 
     """
-    individual = [[ (round(SQUARE_SIZE*random.normal(0.5,0.2)) , round(SQUARE_SIZE*random.normal(0.5,0.2)), layer*LAYER_HEIGHT) for _ in range(round(random.normal(mu,sigma)))] for layer in range(nbr_layers)]
+    individual = [[ (round(SQUARE_SIZE*random.normal(0.5,0.4)) , round(SQUARE_SIZE*random.normal(0.5,0.4)), layer*LAYER_HEIGHT) for _ in range(round(random.normal(mu,sigma)))] for layer in range(nbr_layers)]
     return individual
 
 
@@ -156,6 +157,78 @@ def create_next_generation(population, fitness_values, mode="elitism", size=10, 
         case "default":
             return population
 
+
+def compute_max_force(graph):
+    M = tp.Model(logfile=False)
+    with M.Nodes as MN:
+        for i in range(len(list(graph.nodes()))):
+            MN.add_node(i+1, coord=list(graph.nodes())[i])
+    element_type   = 1    # truss
+    material_type  = 1    # linear-elastic
+
+    youngs_modulus = 4*10**9
+    cross_section_area = math.pi*(1.25*10**(-3))**2
+
+    with M.Elements as ME:
+        for i in range(len(list(graph.edges()))):
+            ME.add_element( i+1, conn=(list(graph.nodes()).index(list(graph.edges())[i][0])+1,list(graph.nodes()).index(list(graph.edges())[i][1])+1) )
+        ME.assign_etype("all", element_type)
+        ME.assign_mtype("all", material_type)
+        ME.assign_material("all", [youngs_modulus])
+        ME.assign_geometry("all", [cross_section_area])
+
+    with M.Boundaries as MB:
+        for i in range(len(list(graph.nodes()))):
+            if list(graph.nodes())[i][2] != 0:
+                break
+            MB.add_bound_U( i+1, (1,1,0) )
+
+    total_ext_forces = 0
+    with M.ExtForces as MF:
+        for i in range(len(list(graph.nodes()))):
+            if list(graph.nodes())[i][2] != list(graph.nodes())[-1][2]:
+                continue
+            MF.add_force( i+1, ( 0, 0,-1) )
+            total_ext_forces += 1
+
+    M.Settings.dlpf = 0.005
+    M.Settings.du = 0.05
+    M.Settings.incs = 163
+    M.Settings.stepcontrol = True
+    M.Settings.maxfac = 4
+    
+    M.Settings.ftol = 8
+    M.Settings.xtol = 8
+    M.Settings.nfev = 8
+    
+    M.Settings.dxtol = 1.25
+    flag = 1
+    try:
+        M.build()
+        M.run()
+
+    except:
+        print("structure de merde")
+        flag = 0
+        
+
+    print("total ext forces : "  + str(total_ext_forces))
+    draw_tower(graph)
+    pinc = 40  # 105
+    fig, ax = M.plot_model(
+        view="3d",
+        contour="force",
+        lim_scale=(0, 10, 0, 10, 0, 10),  # 3d
+        force_scale=10.0,
+        inc=-1,
+    )
+    plt.show()
+    return max(M.Results.R[-1].element_force)[0]*10e2/total_ext_forces
+
+
+def compute_fitness_values(population):
+    print("hello")
+
 if __name__ == "__main__":
     #a = create_individual(4)
     #graph = generate_graph(a)
@@ -169,5 +242,6 @@ if __name__ == "__main__":
     print(len(new_pop))
     #print(new_pop[0])
     graph = generate_graph(new_pop[0])
-    draw_tower(graph)
+    #draw_tower(graph)
+    print("force maximale : " +str(compute_max_force(graph)))
 
