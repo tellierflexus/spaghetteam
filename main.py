@@ -2,146 +2,136 @@ import trusspy as tp
 import networkx as nx
 import itertools
 import math
-from numpy import random, Inf
+import numpy as np
 #%matplotlib inline
 import matplotlib.pyplot as plt
 #matplotlib widget
 from mpl_toolkits.mplot3d import Axes3D
 
-MAX_LENGTH = 4
+MAX_LENGTH = 9
 SQUARE_SIZE=4
 LAYER_HEIGHT=5
 MUTATION_ADD=5
 
-def create_individual(nbr_layers, mu=6, sigma=0.7):
-    """
-    Create an individual 
-    An individual is a list of 4 layer, each layer is a list containing tuple for representing marhsmallow position
-    example : 
-    one_individual = [ 
-    [(1,1), (2,3), (5,6)], 
-    [(1,1), (2,3), (5,6), (2,3), (5,6)], 
-    [(1,1), (2,3), (5,6), (2,3), (5,6), (2,3), (5,6)], 
-    [(1,1), (2,3)] 
-    ]
 
+class Tower:
 
-    """
-    individual = [[ (round(SQUARE_SIZE*random.normal(0.5,0.4)) , round(SQUARE_SIZE*random.normal(0.5,0.4)), layer*LAYER_HEIGHT) for _ in range(round(random.normal(mu,sigma)))] for layer in range(nbr_layers)]
-    return individual
+    def __init__(self, nbr_layers=4, min_marsh=3, max_marsh=10, min_radius=4, max_radius=10, layer_height=5, layers_data=None):
+        if layers_data is None:
+            self._layers = [{"nbr_marsh": round(np.random.uniform(low=min_marsh, high=max_marsh)), "radius": round(np.random.uniform(low=min_radius, high=max_radius))} for _ in range(nbr_layers)]
+        else:
+            self._layers = layers_data
+        self._layer_height=layer_height
+        self._egdges = []
+        self._init_edges()
 
+    @property
+    def layers(self):
+        #print(f"Number of layers : {len(self._layers)}")
+        return self._layers
 
-def create_initial_population(nbr_ind, nbr_layers, mu=5, sigma=1):
-    """
-    Generate an initial population of spaghetti marshmallow towers
+    def _init_edges(self):
 
-    Input : 
-    nbr_ind : the number of towers (individuals) in this inital generation
-    nbr_layers : the number of layers in each tower
-    mu : Mean for gaussian distribution of number of marshmallow in each layer
-    sigma : Sigma for gaussian distribution of number of marshmallow in each layer
+        def get_length(coords_1, coords_2):
+            return math.sqrt((coords_1[0]-coords_2[0])**2 + (coords_1[1]-coords_2[1])**2 + (coords_1[2]-coords_2[2])**2)
+
+        marshmallows = self.get_nodes(layer=0)
+        for num_layer in range(len(self._layers)):
+            start_index = 0
+            for k in range(num_layer):
+                start_index += self._layers[k]["nbr_marsh"]
+
+            
+            for i in range(len(marshmallows)):
+                for j in range(len(marshmallows)):
+                    if i==j:
+                        continue
+                    if get_length(marshmallows[i], marshmallows[j]) < MAX_LENGTH:
+                        edge = [start_index+i+1, start_index+j+1]
+                        if j < i:
+                            edge.reverse()
+                        if edge not in self._egdges:
+                            self._egdges.append(edge)
+            if num_layer < len(self._layers) -1:
+                marshmallows_next_layer = self.get_nodes(layer=num_layer+1)
+                for i in range(len(marshmallows)):
+                    for j in range(len(marshmallows_next_layer)):
+                        if get_length(marshmallows[i], marshmallows_next_layer[j]) < MAX_LENGTH:
+                            edge = [start_index+i+1, start_index+self._layers[num_layer]["nbr_marsh"]+j+1]
+                            if edge not in self._egdges:
+                                self._egdges.append(edge)
+                marshmallows=marshmallows_next_layer
+
+ 
+    @property
+    def edges(self):
+        return self._egdges
+   
+    def mutate(self, min_marsh=3, max_marsh=10, min_radius=4, max_radius=10):
+        nbr_mutations = round(np.random.uniform(low=1, high=len(self._layers)))
+        mutated_layers = list(range(len(self._layers)))
+        np.random.shuffle(mutated_layers)
+        mutated_layers = mutated_layers[:nbr_mutations]
+
+        for layer in mutated_layers:
+            self._layers[layer] = {"nbr_marsh": round(np.random.uniform(low=min_marsh, high=max_marsh)), "radius": round(np.random.uniform(low=min_radius, high=max_radius))}
+        self._egdges = []
+        self._init_edges()
+        print(f"Mutated layers : {mutated_layers}")
+        return self
+
+    def get_nodes(self, layer=None):
+
+        def get_nodes_from_layer(layer):
+            if layer < len(self._layers):
+                self._layers[layer]["radius"]
+                return [[self._layers[layer]["radius"]*np.cos(np.pi*2*i/self._layers[layer]["nbr_marsh"]), self._layers[layer]["radius"]*np.sin(np.pi*2*i/self._layers[layer]["nbr_marsh"]), layer*self._layer_height] for i in range(self._layers[layer]["nbr_marsh"])]
+            else:
+                return []
+
+        if layer is not None:
+            return get_nodes_from_layer(layer)
+        else:
+            nodes = []
+            for i in range(len(self._layers)):
+                nodes.extend(get_nodes_from_layer(i))
+            return nodes
+
     
-    Output:
-    A list of individual
-    An individual is a list of layers, each layer is a list containing tuple for representing marhsmallow position
-    
-    
-    """
-    population = [  create_individual(nbr_layers, mu, sigma)   for _ in range(nbr_ind) ]
-    return population
 
-
-def generate_graph(individual):
-    """
-    Generate a networkx graph from an individual
-
-    Input:
-    An individual
-
-    Output :
-    A networkx graph 
-    """
-    G = nx.Graph()
-    nbr_layers = len(individual)
-    for layer in range(nbr_layers):
-        G.add_nodes_from(individual[layer]) #we add this layer to the graph 
-        potential_spaghetti = list(itertools.combinations(individual[layer],2))
-        if layer < nbr_layers - 1:
-            potential_spaghetti += list(itertools.product(individual[layer], individual[layer+1])) #we add spaghetti between levels
-
-
-        for potential_spaghetto in potential_spaghetti:
-            length = math.sqrt((potential_spaghetto[0][0] - potential_spaghetto[1][0])**2 + (potential_spaghetto[0][1] - potential_spaghetto[1][1])**2)
-            if length < MAX_LENGTH:
-                G.add_edge(potential_spaghetto[0], potential_spaghetto[1])
-
-    return G
-
-
-
-
-
-def check_connectivity(graph):
-    """
-    Check if there is only one tower, i.e from any marshallow we can reach any other marshallow, i.e., the graph is connected. 
-
-    Input:
-    a graph corresponding to an individual
-
-    Output:
-    The degree of connectivity, i.e. the smallest number of connection a marshmallow have
-    """     
-
-    degree_sequence = (d for n, d in graph.degree())
-    return min(degree_sequence)
-
-
-def draw_tower(graph):
-    x, y, z = zip(*list(graph.nodes()))
+def draw_tower(tower):
+    nodes = tower.get_nodes()
+    x, y, z = zip(*nodes)
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
     ax.scatter(x, y, z, c=z, cmap='seismic', linewidths=10, alpha=1)
-    for edge in list(graph.edges()):
-        x_ed, y_ed, z_ed = zip(*list(edge))
+    for edge in tower.edges:
+        x_ed, y_ed, z_ed = zip(*[nodes[index-1] for index in edge]) #-1 because the index in edges start at 1 to be compliant with trusspy
+        #x_ed, y_ed, z_ed = zip(*list(edge))
         ax.plot(x_ed,y_ed,z_ed, c="#FFBB00")
     plt.show()
     fig.savefig("model_undeformed_inc0_3d.png")
 
 
-def crossover(population):
+def crossover(population, strategy="same layer"):
     new_population = []
-    for index in range(len(population)):
-        ind_a = population[index]
-        ind_b = population[-index-1]
-        new_individual_a = []
-        new_individual_b = []
-        for layer in range(len(ind_a)):
-            new_layer_a = []
-            new_layer_b = []
-            new_layer_a.extend(ind_a[layer][:round(random.random()*(len(ind_a[layer])-1))])
-            new_layer_a.extend(ind_b[layer][round(random.random()*(len(ind_b[layer])-1)):])
-            new_layer_b.extend(ind_a[layer][round(random.random()*(len(ind_a[layer])-1)):])
-            new_layer_b.extend(ind_b[layer][:round(random.random()*(len(ind_b[layer])-1))])
-            new_individual_a.append(new_layer_a)
-            new_individual_b.append(new_layer_b)
-        new_population.append(new_individual_a)
-        new_population.append(new_individual_b)
+    for i in range(len(population)):
+        tower_a = population[i]
+        tower_b = population[-1-i]
+        match strategy:
+            case "same layer":
+                layers_data = []
+                for j in range(len(tower_a.layers)):
+                    if np.random.rand() > 0.5:
+                        layers_data.append(tower_a.layers[j])
+                    else:
+                        layers_data.append(tower_b.layers[j])
+                new_population.append(Tower(layers_data=layers_data))
+            case _:
+                print("Hello")
     return new_population
 
-def mutate(population):
-    mutated_population = []
-    print("size of ind 0 layer 0 " + str(len(population[0][0])))
-    for ind in population:
-        for layer in range(len(ind)):
-            for _ in range(round(MUTATION_ADD*random.random())):
-                ind[layer].append((round(SQUARE_SIZE*random.random()), round(SQUARE_SIZE*random.random()), layer))
-                print("added marshmallow to layer " + str(layer))
-        mutated_population.append(ind)
-    print("size of ind 0 layer 0 after mutation " + str(len(population[0][0])))
-    return mutated_population
 
-
-    return mutated_population
 
 def create_next_generation(population, fitness_values, mode="elitism", size=10, elitism_size=2, crossover_size=6, mutation_size=2):
     new_population = []
@@ -150,19 +140,21 @@ def create_next_generation(population, fitness_values, mode="elitism", size=10, 
             sorted_population = [individual for _, individual in sorted(zip(fitness_values, population), key=lambda pair: pair[0])]         
             new_population.extend(sorted_population[:elitism_size])
             sorted_population = sorted_population[elitism_size:]
-            random.shuffle(sorted_population) #to prevent always the same element beeing crossover of mutate
+            np.random.shuffle(sorted_population) #to prevent always the same element beeing crossover of mutate
             new_population.extend(crossover(sorted_population[:crossover_size]))
-            new_population.extend(mutate(sorted_population[crossover_size:]))
+
+            new_population.extend([tower.mutate() for tower in sorted_population[crossover_size:]])
             return new_population
         case "default":
             return population
 
 
-def compute_max_force(graph):
-    M = tp.Model(logfile=False)
+def fitness(tower, log=True):
+    M = tp.Model(logfile=log)
     with M.Nodes as MN:
-        for i in range(len(list(graph.nodes()))):
-            MN.add_node(i+1, coord=list(graph.nodes())[i])
+        nodes = tower.get_nodes()
+        for i in range(len(nodes)):
+            MN.add_node(i+1, coord=nodes[i])
     element_type   = 1    # truss
     material_type  = 1    # linear-elastic
 
@@ -170,23 +162,24 @@ def compute_max_force(graph):
     cross_section_area = math.pi*(1.25*10**(-3))**2
 
     with M.Elements as ME:
-        for i in range(len(list(graph.edges()))):
-            ME.add_element( i+1, conn=(list(graph.nodes()).index(list(graph.edges())[i][0])+1,list(graph.nodes()).index(list(graph.edges())[i][1])+1) )
+        edges = tower.edges
+        for i in range(len(edges)):
+            ME.add_element( i+1, conn=edges[i] )
         ME.assign_etype("all", element_type)
         ME.assign_mtype("all", material_type)
         ME.assign_material("all", [youngs_modulus])
         ME.assign_geometry("all", [cross_section_area])
 
     with M.Boundaries as MB:
-        for i in range(len(list(graph.nodes()))):
-            if list(graph.nodes())[i][2] != 0:
+        for i in range(len(nodes)):
+            if nodes[i][2] != 0:
                 break
             MB.add_bound_U( i+1, (1,1,0) )
 
     total_ext_forces = 0
     with M.ExtForces as MF:
-        for i in range(len(list(graph.nodes()))):
-            if list(graph.nodes())[i][2] != list(graph.nodes())[-1][2]:
+        for i in range(len(nodes)):
+            if nodes[i][2] != nodes[-1][2]:
                 continue
             MF.add_force( i+1, ( 0, 0,-1) )
             total_ext_forces += 1
@@ -203,45 +196,55 @@ def compute_max_force(graph):
     
     M.Settings.dxtol = 1.25
     flag = 1
+    print(dir(M))
     try:
         M.build()
+    except ValueError as e:
+        print("MEEEEEERDE")
+        return np.inf
+    try:
         M.run()
-
-    except:
+    except np.linalg.LinAlgError as err:
         print("structure de merde")
-        flag = 0
+        return np.inf
+    except Warning:
+        print("structure de merde")
+        return np.inf
+    except ValueError:
+        print("structure de merde")
+        return np.inf
         
 
     print("total ext forces : "  + str(total_ext_forces))
-    draw_tower(graph)
-    pinc = 40  # 105
-    fig, ax = M.plot_model(
-        view="3d",
-        contour="force",
-        lim_scale=(0, 10, 0, 10, 0, 10),  # 3d
-        force_scale=10.0,
-        inc=-1,
-    )
-    plt.show()
-    return max(M.Results.R[-1].element_force)[0]*10e2/total_ext_forces
+    #draw_tower(tower)
+    #pinc = 40  # 105
+    #fig, ax = M.plot_model(
+    #    view="3d",
+    #    contour="force",
+    #    lim_scale=(-10, 10, -10, 10, 0, 20),  # 3d
+    #    force_scale=0.4*10e5,
+    #    inc=-1,
+    #)
+    #plt.show()
+    return len(tower.edges)*max(M.Results.R[-1].element_force)[0]*10e2/total_ext_forces
 
 
-def compute_fitness_values(population):
-    print("hello")
+
 
 if __name__ == "__main__":
-    #a = create_individual(4)
-    #graph = generate_graph(a)
-    #print(graph.nodes())
-    #print(graph.edges())
-    #print(check_connectivity(graph))
-    #draw_tower(graph)
-    population = create_initial_population(10,4)
-    fitness_values = [random.random() for _ in range(len(population))]
-    new_pop = create_next_generation(population, fitness_values)
-    print(len(new_pop))
-    #print(new_pop[0])
-    graph = generate_graph(new_pop[0])
-    #draw_tower(graph)
-    print("force maximale : " +str(compute_max_force(graph)))
+    a = Tower()
+    population = [Tower() for _ in range(4)]
+    #draw_tower(population[0])
+    #draw_tower(population[0].mutate())
+    fitnesses = [fitness(tower) for tower in population]
+    
+    new_population = create_next_generation(population, fitnesses)
+    new_fitnesses = [fitness(tower) for tower in new_population]
+    print(sorted(fitnesses))
+    print(sorted(new_fitnesses))
+
+    
+    
+
+
 
