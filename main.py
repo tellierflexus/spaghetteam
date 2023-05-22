@@ -7,16 +7,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 #matplotlib widget
 from mpl_toolkits.mplot3d import Axes3D
+import warnings
+warnings.filterwarnings("error")
+import scipy
+import pickle
+from threading import Thread
 
-MAX_LENGTH = 9
-SQUARE_SIZE=4
-LAYER_HEIGHT=5
-MUTATION_ADD=5
+MAX_LENGTH = 25
 
 
 class Tower:
 
-    def __init__(self, nbr_layers=4, min_marsh=3, max_marsh=10, min_radius=4, max_radius=10, layer_height=5, layers_data=None):
+    def __init__(self, nbr_layers=4, min_marsh=3, max_marsh=10, min_radius=10, max_radius=40, layer_height=10, layers_data=None):
         if layers_data is None:
             self._layers = [{"nbr_marsh": round(np.random.uniform(low=min_marsh, high=max_marsh)), "radius": round(np.random.uniform(low=min_radius, high=max_radius))} for _ in range(nbr_layers)]
         else:
@@ -66,8 +68,16 @@ class Tower:
     @property
     def edges(self):
         return self._egdges
+
+    @property
+    def nbr_nodes(self):
+        sum = 0
+        for i in range(len(self._layers)):
+            sum += self._layers[i]["nbr_marsh"]
+        return sum
+    
    
-    def mutate(self, min_marsh=3, max_marsh=10, min_radius=4, max_radius=10):
+    def mutate(self, min_marsh=3, max_marsh=10, min_radius=10, max_radius=40):
         nbr_mutations = round(np.random.uniform(low=1, high=len(self._layers)))
         mutated_layers = list(range(len(self._layers)))
         np.random.shuffle(mutated_layers)
@@ -144,12 +154,24 @@ def create_next_generation(population, fitness_values, mode="elitism", size=10, 
             new_population.extend(crossover(sorted_population[:crossover_size]))
 
             new_population.extend([tower.mutate() for tower in sorted_population[crossover_size:]])
-            return new_population
+            thread_results = []
+            threads = [None] * len(new_population)
+            for i in range(len(threads)):
+                threads[i] = Thread(target=fitness, args=(new_population[i], thread_results))
+                threads[i].start()
+                print(f"Started thread {i}")
+            
+            for i in range(len(threads)):
+                threads[i].join()
+            return zip(*thread_results)
+            #return new_population, [fitness(tower) for tower in new_population]
+
         case "default":
             return population
 
 
-def fitness(tower, log=True):
+def fitness(tower, results, log=False):
+    print("eeeeh zzzzzéééé parti")
     M = tp.Model(logfile=log)
     with M.Nodes as MN:
         nodes = tower.get_nodes()
@@ -187,7 +209,7 @@ def fitness(tower, log=True):
     M.Settings.dlpf = 0.005
     M.Settings.du = 0.05
     M.Settings.incs = 163
-    M.Settings.stepcontrol = True
+    M.Settings.stepcontrol = False
     M.Settings.maxfac = 4
     
     M.Settings.ftol = 8
@@ -195,26 +217,26 @@ def fitness(tower, log=True):
     M.Settings.nfev = 8
     
     M.Settings.dxtol = 1.25
-    flag = 1
-    print(dir(M))
     try:
         M.build()
     except ValueError as e:
-        print("MEEEEEERDE")
-        return np.inf
+        results.append((tower, np.inf))
+        return
     try:
         M.run()
-    except np.linalg.LinAlgError as err:
-        print("structure de merde")
-        return np.inf
-    except Warning:
-        print("structure de merde")
-        return np.inf
-    except ValueError:
-        print("structure de merde")
-        return np.inf
+    except RuntimeWarning:
+        results.append((tower, np.inf))
+        return
+    except ValueError as e:
+        results.append((tower, np.inf))
+        return
+    except scipy.sparse.linalg._dsolve.linsolve.MatrixRankWarning as e:
+        results.append((tower, np.inf))
+        return
+    except Exception as e:
+        results.append((tower, np.inf))
+        return
         
-
     print("total ext forces : "  + str(total_ext_forces))
     #draw_tower(tower)
     #pinc = 40  # 105
@@ -226,22 +248,35 @@ def fitness(tower, log=True):
     #    inc=-1,
     #)
     #plt.show()
-    return len(tower.edges)*max(M.Results.R[-1].element_force)[0]*10e2/total_ext_forces
+    #fitness = len(tower.edges)*max(M.Results.R[-1].element_force)[0]*10e3/total_ext_forces
+    fitness = tower.nbr_nodes*max(M.Results.R[-1].element_force)[0]*10e3/total_ext_forces
+    results.append((tower, fitness))
+    #return fitness
 
 
 
 
 if __name__ == "__main__":
-    a = Tower()
-    population = [Tower() for _ in range(4)]
-    #draw_tower(population[0])
-    #draw_tower(population[0].mutate())
-    fitnesses = [fitness(tower) for tower in population]
+    population = [Tower() for _ in range(10)]
+    results = []
+    a = 0
+    for i in range(len(population)):
+        a+=1
+        fitness(population[i], results)
+    _, fitnesses = zip(*results)
+    generation = 0
+    print(f"Generation {generation}, length : {len(population)}, {len(fitnesses)} , Fitnesses : {sorted(fitnesses)}")
+    input("Press Enter to continue...")
     
-    new_population = create_next_generation(population, fitnesses)
-    new_fitnesses = [fitness(tower) for tower in new_population]
-    print(sorted(fitnesses))
-    print(sorted(new_fitnesses))
+    while generation < 10:
+        population, fitnesses = create_next_generation(population, fitnesses)
+        generation+=1
+        print(f"Generation {generation}, length : {len(population)} , Fitnesses : {sorted(fitnesses)}")
+        #input("Press Enter to continue...")
+    draw_tower(population[fitnesses.index(min(fitnesses))])
+    with open('towers.pkl', 'wb') as out_file:
+        pickle.dump(population, out_file)
+    
 
     
     
