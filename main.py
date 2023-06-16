@@ -12,13 +12,17 @@ warnings.filterwarnings("error")
 import scipy
 import pickle
 from threading import Thread
+from slientruss3d.truss import Truss
+from slientruss3d.type  import SupportType, MemberType
+import copy
 
 MAX_LENGTH = 25
+MAX_MARSH = 15
 
 
 class Tower:
 
-    def __init__(self, nbr_layers=4, min_marsh=3, max_marsh=10, min_radius=10, max_radius=40, layer_height=10, layers_data=None):
+    def __init__(self, nbr_layers=4, min_marsh=3, max_marsh=20, min_radius=4, max_radius=40, layer_height=10, layers_data=None):
         if layers_data is None:
             self._layers = [{"nbr_marsh": round(np.random.uniform(low=min_marsh, high=max_marsh)), "radius": round(np.random.uniform(low=min_radius, high=max_radius))} for _ in range(nbr_layers)]
         else:
@@ -49,7 +53,7 @@ class Tower:
                     if i==j:
                         continue
                     if get_length(marshmallows[i], marshmallows[j]) < MAX_LENGTH:
-                        edge = [start_index+i+1, start_index+j+1]
+                        edge = [start_index+i, start_index+j]
                         if j < i:
                             edge.reverse()
                         if edge not in self._egdges:
@@ -59,7 +63,7 @@ class Tower:
                 for i in range(len(marshmallows)):
                     for j in range(len(marshmallows_next_layer)):
                         if get_length(marshmallows[i], marshmallows_next_layer[j]) < MAX_LENGTH:
-                            edge = [start_index+i+1, start_index+self._layers[num_layer]["nbr_marsh"]+j+1]
+                            edge = [start_index+i, start_index+self._layers[num_layer]["nbr_marsh"]+j]
                             if edge not in self._egdges:
                                 self._egdges.append(edge)
                 marshmallows=marshmallows_next_layer
@@ -77,25 +81,27 @@ class Tower:
         return sum
     
    
-    def mutate(self, min_marsh=3, max_marsh=10, min_radius=10, max_radius=40):
+    def mutate(self, min_marsh=3, max_marsh=20, min_radius=4, max_radius=100):
+
         nbr_mutations = round(np.random.uniform(low=1, high=len(self._layers)))
         mutated_layers = list(range(len(self._layers)))
         np.random.shuffle(mutated_layers)
         mutated_layers = mutated_layers[:nbr_mutations]
 
         for layer in mutated_layers:
-            self._layers[layer] = {"nbr_marsh": round(np.random.uniform(low=min_marsh, high=max_marsh)), "radius": round(np.random.uniform(low=min_radius, high=max_radius))}
+            self._layers[layer] = {"nbr_marsh": min(max(round(np.random.normal(self._layers[layer]["nbr_marsh"],2)), min_marsh), max_marsh), "radius": min(max(round(np.random.normal(self._layers[layer]["radius"],4)), min_radius), max_radius)}
         self._egdges = []
         self._init_edges()
-        print(f"Mutated layers : {mutated_layers}")
+            #print(f"Mutated layers : {mutated_layers}")
         return self
+
 
     def get_nodes(self, layer=None):
 
         def get_nodes_from_layer(layer):
             if layer < len(self._layers):
                 self._layers[layer]["radius"]
-                return [[self._layers[layer]["radius"]*np.cos(np.pi*2*i/self._layers[layer]["nbr_marsh"]), self._layers[layer]["radius"]*np.sin(np.pi*2*i/self._layers[layer]["nbr_marsh"]), layer*self._layer_height] for i in range(self._layers[layer]["nbr_marsh"])]
+                return [(self._layers[layer]["radius"]*np.cos(np.pi*2*i/self._layers[layer]["nbr_marsh"]), self._layers[layer]["radius"]*np.sin(np.pi*2*i/self._layers[layer]["nbr_marsh"]), layer*self._layer_height) for i in range(self._layers[layer]["nbr_marsh"])]
             else:
                 return []
 
@@ -116,9 +122,10 @@ def draw_tower(tower):
     ax = fig.add_subplot(111, projection="3d")
     ax.scatter(x, y, z, c=z, cmap='seismic', linewidths=10, alpha=1)
     for edge in tower.edges:
-        x_ed, y_ed, z_ed = zip(*[nodes[index-1] for index in edge]) #-1 because the index in edges start at 1 to be compliant with trusspy
+        x_ed, y_ed, z_ed = zip(*[nodes[index] for index in edge]) #-1 because the index in edges start at 1 to be compliant with trusspy
         #x_ed, y_ed, z_ed = zip(*list(edge))
         ax.plot(x_ed,y_ed,z_ed, c="#FFBB00")
+    plt.title(str(tower.layers))
     plt.show()
     fig.savefig("model_undeformed_inc0_3d.png")
 
@@ -143,7 +150,7 @@ def crossover(population, strategy="same layer"):
 
 
 
-def create_next_generation(population, fitness_values, mode="elitism", size=10, elitism_size=2, crossover_size=6, mutation_size=2):
+def create_next_generation(population, fitness_values, mode="elitism", size=10, elitism_size=2, crossover_size=4, mutation_size=4):
     new_population = []
     match mode:
         case "elitism":
@@ -159,121 +166,140 @@ def create_next_generation(population, fitness_values, mode="elitism", size=10, 
             for i in range(len(threads)):
                 threads[i] = Thread(target=fitness, args=(new_population[i], thread_results))
                 threads[i].start()
-                print(f"Started thread {i}")
+                #print(f"Started thread {i}")
             
             for i in range(len(threads)):
                 threads[i].join()
             return zip(*thread_results)
             #return new_population, [fitness(tower) for tower in new_population]
 
-        case "default":
-            return population
+        case "fusion":
+
+            new_population.extend(population)
+            for tower in population:
+                new_tower = copy.deepcopy(tower)
+                new_tower.mutate()
+                new_population.append(new_tower)
+
+            new_population.extend(crossover(population))
+            thread_results = []
+            threads = [None] * len(new_population)
+            print(f"population len : {len(new_population)}")
+            for i in range(len(new_population)):
+                threads[i] = Thread(target=fitness, args=(new_population[i], thread_results))
+                threads[i].start()
+                #print(f"Started thread {i}")
+            
+            for i in range(len(threads)):
+                threads[i].join()
+            sorted_population = [(individual, fitness) for individual, fitness in sorted(thread_results, key=lambda pair: pair[1])]
+            #for i in sorted_population:
+            #    print(i[1])
+            print(f"Best fitness : {sorted_population[0][1]}")
+            #print("using fusion mode")
+            return zip(*sorted_population[:size])
+
 
 
 def fitness(tower, results, log=False):
-    print("eeeeh zzzzzéééé parti")
-    M = tp.Model(logfile=log)
-    with M.Nodes as MN:
-        nodes = tower.get_nodes()
-        for i in range(len(nodes)):
-            MN.add_node(i+1, coord=nodes[i])
-    element_type   = 1    # truss
-    material_type  = 1    # linear-elastic
+    truss = Truss(dim=3)
+    total_ext_forces =0
+    nodes = tower.get_nodes()
+    for i in range(len(nodes)):
+        if nodes[i][2]==0:
+            support=SupportType.ROLLER_Z
+        else:
+            support=SupportType.NO
+        truss.AddNewJoint(nodes[i], support)
+        truss.AddExternalForce(i, (0, 0, -20))
+        if nodes[i][2]==nodes[-1][2]:
+            truss.AddExternalForce(i, (0, 0, -100))
+            total_ext_forces+=1
 
-    youngs_modulus = 4*10**9
-    cross_section_area = math.pi*(1.25*10**(-3))**2
-
-    with M.Elements as ME:
-        edges = tower.edges
-        for i in range(len(edges)):
-            ME.add_element( i+1, conn=edges[i] )
-        ME.assign_etype("all", element_type)
-        ME.assign_mtype("all", material_type)
-        ME.assign_material("all", [youngs_modulus])
-        ME.assign_geometry("all", [cross_section_area])
-
-    with M.Boundaries as MB:
-        for i in range(len(nodes)):
-            if nodes[i][2] != 0:
-                break
-            MB.add_bound_U( i+1, (1,1,0) )
-
-    total_ext_forces = 0
-    with M.ExtForces as MF:
-        for i in range(len(nodes)):
-            if nodes[i][2] != nodes[-1][2]:
-                continue
-            MF.add_force( i+1, ( 0, 0,-1) )
-            total_ext_forces += 1
-
-    M.Settings.dlpf = 0.005
-    M.Settings.du = 0.05
-    M.Settings.incs = 163
-    M.Settings.stepcontrol = False
-    M.Settings.maxfac = 4
+    edges = tower.edges
+    memberType = MemberType(1, 1e7, 1e5)
+    for edge in edges:
+        truss.AddNewMember(edge[0], edge[1], memberType)
+    #print("total ext forces : "  + str(total_ext_forces))
+    trials=[]
+    for _ in range(5):
+        try:
+            truss.Solve()
+        except Exception as e:
+            #print(str(e))
+            #trials.append(np.inf)
+            print(str(e))
+        else:
+            forces = truss.GetInternalForces(isProtect=True)
+            trials.append(max(forces.values()))
     
-    M.Settings.ftol = 8
-    M.Settings.xtol = 8
-    M.Settings.nfev = 8
+    if len(trials)>0:
+        force = np.mean(trials)
+    else:
+        force = np.inf
     
-    M.Settings.dxtol = 1.25
-    try:
-        M.build()
-    except ValueError as e:
-        results.append((tower, np.inf))
-        return
-    try:
-        M.run()
-    except RuntimeWarning:
-        results.append((tower, np.inf))
-        return
-    except ValueError as e:
-        results.append((tower, np.inf))
-        return
-    except scipy.sparse.linalg._dsolve.linsolve.MatrixRankWarning as e:
-        results.append((tower, np.inf))
-        return
-    except Exception as e:
-        results.append((tower, np.inf))
-        return
-        
-    print("total ext forces : "  + str(total_ext_forces))
-    #draw_tower(tower)
-    #pinc = 40  # 105
-    #fig, ax = M.plot_model(
-    #    view="3d",
-    #    contour="force",
-    #    lim_scale=(-10, 10, -10, 10, 0, 20),  # 3d
-    #    force_scale=0.4*10e5,
-    #    inc=-1,
-    #)
-    #plt.show()
-    #fitness = len(tower.edges)*max(M.Results.R[-1].element_force)[0]*10e3/total_ext_forces
-    fitness = tower.nbr_nodes*max(M.Results.R[-1].element_force)[0]*10e3/total_ext_forces
+
+    #fitness = (len(tower.edges)+tower.nbr_nodes)*max(forces.values())/total_ext_forces
+    #fitness = (len(tower.edges)+tower.nbr_nodes)*force/total_ext_forces
+    fitness = (len(tower.edges)+tower.nbr_nodes)*force/total_ext_forces
     results.append((tower, fitness))
-    #return fitness
-
 
 
 
 if __name__ == "__main__":
+    """
+    results_after_iterations = []
+    fitnesses = [np.inf]
+    while (fitnesses[0] == np.inf):
+        tower = Tower()
+        results = []
+        fitness(tower, results)
+        _, fitnesses = zip(*results)
+    input("Press Enter to continue...")
+    for _ in range(30):
+        results = []
+        fitness(tower, results)
+        _, fitnesses = zip(*results)   
+        results_after_iterations.append(fitnesses[0]) 
+    plt.scatter(list(range(len(results_after_iterations))), results_after_iterations)
+    plt.show()
+
+    """
+    f = open("fitnesses.txt", "w")
+    
     population = [Tower() for _ in range(10)]
     results = []
-    a = 0
+
+
     for i in range(len(population)):
-        a+=1
+
         fitness(population[i], results)
     _, fitnesses = zip(*results)
+
+
     generation = 0
+    mean_fitness = []
+    min_fitness = []
     print(f"Generation {generation}, length : {len(population)}, {len(fitnesses)} , Fitnesses : {sorted(fitnesses)}")
-    input("Press Enter to continue...")
-    
-    while generation < 10:
-        population, fitnesses = create_next_generation(population, fitnesses)
+    f.write(f"Generation {generation}, Fitnesses : {sorted(fitnesses)}\n")
+    mean_fitness.append(np.mean(fitnesses))
+    progress = 1
+    while (progress):
+        population, fitnesses = create_next_generation(population, fitnesses, mode="fusion", size=10)
         generation+=1
         print(f"Generation {generation}, length : {len(population)} , Fitnesses : {sorted(fitnesses)}")
+        f.write(f"Generation {generation}, Fitnesses : {sorted(fitnesses)}\n")
+        mean_fitness.append(np.mean(fitnesses))
+        min_fitness.append(np.min(fitnesses))
+        if (len(min_fitness) >=5 ) and (min_fitness[-5] - np.min(fitnesses) < 10):
+            progress=0
         #input("Press Enter to continue...")
     draw_tower(population[fitnesses.index(min(fitnesses))])
+    plt.scatter(list(range(len(mean_fitness))), mean_fitness)
+    plt.xlabel('generations')
+    plt.ylabel('mean fitness function value')
+    plt.show()
+    f.close()
     with open('towers.pkl', 'wb') as out_file:
         pickle.dump(population, out_file)
     
